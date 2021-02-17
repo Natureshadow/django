@@ -1,4 +1,7 @@
+import os
 import signal
+from contextlib import contextmanager
+from tempfile import mkstemp
 
 from django.db.backends.base.client import BaseDatabaseClient
 
@@ -6,6 +9,7 @@ from django.db.backends.base.client import BaseDatabaseClient
 class DatabaseClient(BaseDatabaseClient):
     executable_name = 'psql'
 
+    @contextmanager
     @classmethod
     def settings_to_cmd_args_env(cls, settings_dict, parameters):
         args = [cls.executable_name]
@@ -32,8 +36,6 @@ class DatabaseClient(BaseDatabaseClient):
         args.extend(parameters)
 
         env = {}
-        if passwd:
-            env['PGPASSWORD'] = str(passwd)
         if service:
             env['PGSERVICE'] = str(service)
         if sslmode:
@@ -44,7 +46,20 @@ class DatabaseClient(BaseDatabaseClient):
             env['PGSSLCERT'] = str(sslcert)
         if sslkey:
             env['PGSSLKEY'] = str(sslkey)
-        return args, env
+        if passwd:
+            pass_fd, pass_path = mkstemp()
+            os.close(pass_fd)
+            with open(pass_path, 'w') as pass_file:
+                pass_file.write(f'*:*:*:*:{passwd}\n')
+            env['PGPASSFILE'] = pass_path
+        else:
+            pass_path = ''
+
+        try:
+            yield args, env
+        finally:
+            if pass_path:
+                os.unlink(pass_path)
 
     def runshell(self, parameters):
         sigint_handler = signal.getsignal(signal.SIGINT)
